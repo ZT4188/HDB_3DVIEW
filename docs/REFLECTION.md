@@ -4,46 +4,45 @@
 
 | Activity | % of Time | Notes |
 |---|---|---|
-| Planning & architecture | 15% | Solution design, tech selection, risk mapping |
-| Research | 20% | deck.gl ScenegraphLayer docs, CityJSON format, PostGIS spatial queries, Celery + asyncio patterns |
-| Coding | 55% | Backend models/API/sim engine, frontend components, docker-compose wiring |
-| Documentation | 10% | README, inline comments, implementation plan |
+| Planning & architecture | 20% | Solution design, tech stack evaluation, API surface, data model |
+| Research | 15% | CityJSON/cjio pipeline, deck.gl ScenegraphLayer, PostGIS, Cloud Run WS support |
+| Coding — backend | 35% | FastAPI, ORM models, simulation engine, Celery/WebSocket integration |
+| Coding — frontend | 20% | deck.gl map, Zustand store, all UI components |
+| DevOps / infra | 10% | Docker Compose, Dockerfiles, Terraform, CI pipeline |
 
 ---
 
 ## What I Would Have Done Differently
 
-### 1. Start with a data spike on the CityJSON pipeline
-The biggest unknown was the CityJSON → deck.gl rendering pipeline. I would now front-load a 2–3 hour spike: parse one building from `hdb3d-r.json`, render it in deck.gl, confirm performance — *before* designing any backend. That spike would have de-risked the most technically uncertain part early and potentially changed the rendering approach (e.g. opting for extruded polygons from the start rather than treating 3D models as the primary path).
+**1. Validate the CityJSON pipeline on day one.**
+The CityJSON → glTF conversion (T-01) was the highest-risk task. I would prototype it immediately with a sample of 50 buildings before committing to the full architecture — a geometry format surprise could have forced an early pivot to pure extruded polygons.
 
-### 2. Use MapLibre GL instead of Mapbox
-Mapbox requires a token and has usage-based billing that adds operational friction. MapLibre GL JS is a drop-in OSS replacement that works with Singapore's free [OneMap tiles](https://www.onemap.gov.sg/docs/) — removing all map licensing concerns. I would make this the default from day one.
+**2. Use MapLibre GL JS from the start instead of Mapbox.**
+Mapbox requires an API token which creates friction for reviewers. MapLibre GL JS is a fully open-source drop-in replacement using OpenStreetMap or Singapore's OneMap tiles at zero cost. Switching mid-project wastes time.
 
-### 3. Ship a simpler simulation engine first
-The NumPy-vectorised engine with births/deaths/moves is correct, but the *Celery + Redis pub/sub + WebSocket* plumbing around it is the real integration complexity. I would first implement the simulation loop as a simple `asyncio` background task running in the FastAPI process — no Celery, no Redis pub/sub. That would deliver the full simulation UX in half the time, with Celery as a later optimisation for scaling.
+**3. Write the simulation engine as a pure function first.**
+I would implement `services/simulation.py` as a standalone, synchronous, unit-tested function completely decoupled from FastAPI and Celery. Verify the demographic math works correctly, then wire it into async background tasks. This ordering dramatically reduces debugging complexity.
 
-### 4. Use a monorepo tool (Turborepo or pnpm workspaces)
-With a clear `frontend/` + `backend/` split, a monorepo tool would enable single-command linting, testing, and building across both packages, which matters as the codebase grows.
+**4. Use SSE instead of WebSockets for tick delivery.**
+Since tick data only flows server → client, Server-Sent Events would have been simpler than WebSockets: no reconnection logic, native browser support, works through any HTTP proxy, trivially supported by FastAPI's `StreamingResponse`. Simulation controls go through REST anyway, so full-duplex isn't needed.
+
+**5. Bundle a small fixture dataset in the repo.**
+A subset of ~500 buildings from one town (e.g. Tampines) committed as a fixture would let reviewers run `docker compose up` and see a populated map immediately, without the `prepare_assets.sh` download step. Lower friction = better first impression.
 
 ---
 
-## Areas of Improvement with More Time
+## Areas for Improvement with More Time
 
-### Performance
-- **Level-of-detail (LOD)**: At zoom < 13, render buildings as flat `GeoJsonLayer` extruded polygons (~10× faster). Switch to 3D models only at high zoom. deck.gl supports this natively via layer visibility conditions.
-- **Incremental WebSocket diffs**: Currently the `resident_deltas` payload sends every building's count on every tick. For 10k+ buildings this is ~200KB per second. Switch to sending only changed buildings (delta compression).
+**Performance**
+- Full CityJSON → glTF pipeline to render actual building footprint models instead of procedural boxes
+- PostGIS `GIST` index + `ST_DWithin` for proximity-weighted move destinations instead of random sampling
+- deck.gl LOD: switch to GeoJsonLayer at zoom < 13 to avoid rendering 12k 3D models when too small to distinguish
 
-### Simulation Fidelity
-- Use real Singapore census data (Singstat) for age-stratified birth/death rates rather than flat rates.
-- Model HDB flat types separately — 3-room flats have different occupancy profiles than 5-room flats.
-- Add household formation (new couples moving into vacant flats) as a distinct event type.
+**Features**
+- Proximity-weighted move logic: residents prefer nearby flats
+- Singapore SingStat integration: town-level birth/death rates instead of flat national averages
+- CSV / shareable link export of simulation results
 
-### UX
-- **Building search**: Typeahead search by address/block number to fly the camera to a specific building.
-- **Comparison mode**: Split-screen two simulation sessions side-by-side.
-- **Export**: Download the move log or yearly stats as CSV.
-
-### Operations
-- **CI/CD pipeline**: GitHub Actions workflow to run tests, build images, and deploy to Cloud Run on merge to `main`.
-- **Observability**: Cloud Monitoring dashboards for API latency, WebSocket connection count, simulation queue depth.
-- **Database backups**: Automated snapshot before each major seeding operation.
+**Reliability**
+- Snapshot diff compression: store only resident count deltas per year (not full maps), reducing storage from ~50MB to ~5MB for 100 simulated years
+- Celery Beat for periodic tick scheduling instead of a tight loop inside a single long-running task
