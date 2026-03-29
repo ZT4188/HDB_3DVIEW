@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HDB 3D Simulation — Technical Implementation Plan</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --surface2: #181c24;
+    --border: #242830;
+    --accent: #00e5a0;
+    --accent2: #3b82f6;
+    --accent3: #f59e0b;
+    --text: #e8ecf0;
+    --muted: #6b7280;
+    --danger: #f87171;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Lora', Georgia, serif;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  /* ---- HEADER ---- */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 64px 80px 48px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 32px;
+  }
+
+  .badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 4vw, 48px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: #fff;
+  }
+  h1 span { color: var(--accent); }
+
+  .meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.8;
+  }
+
+  /* ---- LAYOUT ---- */
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 80px 120px;
+  }
+
+  /* ---- SECTIONS ---- */
+  section {
+    margin-top: 72px;
+  }
+
+  .section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .section-number {
+    color: var(--accent);
+    margin-right: 8px;
+  }
+
+  h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 28px 0 10px;
+    letter-spacing: 0.01em;
+  }
+
+  p { margin-bottom: 14px; color: #c5cdd6; }
+
+  /* ---- ARCHITECTURE DIAGRAM ---- */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    margin: 24px 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .arch-col {
+    background: var(--surface);
+    padding: 24px 20px;
+  }
+  .arch-col-header {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .arch-layer {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .arch-layer-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .arch-layer-desc {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .arch-layer.accent { border-color: var(--accent); }
+  .arch-layer.accent .arch-layer-name { color: var(--accent); }
+  .arch-layer.blue { border-color: var(--accent2); }
+  .arch-layer.blue .arch-layer-name { color: var(--accent2); }
+  .arch-layer.amber { border-color: var(--accent3); }
+  .arch-layer.amber .arch-layer-name { color: var(--accent3); }
+
+  /* ---- TECH CARDS ---- */
+  .tech-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+  }
+
+  .tech-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    transition: border-color 0.2s;
+  }
+  .tech-card:hover { border-color: var(--accent); }
+
+  .tech-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .tech-role {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .tech-why {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ---- COMPARISON TABLE ---- */
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    margin: 20px 0;
+  }
+  .compare-table th {
+    background: var(--surface2);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10px;
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .compare-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .compare-table tr:hover td { background: var(--surface); }
+  .chosen { color: var(--accent) !important; font-weight: 500; }
+  .tag {
+    display: inline-block;
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-left: 6px;
+  }
+  .tag-chosen { background: rgba(0,229,160,0.12); color: var(--accent); border: 1px solid rgba(0,229,160,0.3); }
+  .tag-alt { background: rgba(107,114,128,0.15); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ---- PRIORITY MATRIX ---- */
+  .priority-list {
+    counter-reset: priority;
+    margin: 20px 0;
+  }
+  .priority-item {
+    counter-increment: priority;
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+  .priority-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--border);
+    line-height: 1;
+    padding-top: 3px;
+  }
+  .priority-item.p1 .priority-num { color: var(--accent); }
+  .priority-item.p2 .priority-num { color: var(--accent2); }
+  .priority-item.p3 .priority-num { color: var(--accent3); }
+  .priority-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .priority-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* ---- TASK TABLE ---- */
+  .task-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 13px;
+  }
+  .task-table thead th {
+    background: var(--surface2);
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .task-table tbody td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: #c5cdd6;
+    line-height: 1.5;
+  }
+  .task-table tbody tr:hover td { background: var(--surface); }
+  .task-id {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .est {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    white-space: nowrap;
+    color: var(--accent3);
+  }
+  .prio-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+  .prio-p1 { background: rgba(0,229,160,0.1); color: var(--accent); border: 1px solid rgba(0,229,160,0.25); }
+  .prio-p2 { background: rgba(59,130,246,0.1); color: var(--accent2); border: 1px solid rgba(59,130,246,0.25); }
+  .prio-p3 { background: rgba(245,158,11,0.1); color: var(--accent3); border: 1px solid rgba(245,158,11,0.25); }
+  .prio-p4 { background: rgba(107,114,128,0.1); color: var(--muted); border: 1px solid var(--border); }
+
+  .section-header {
+    grid-column: 1 / -1;
+    background: var(--surface2);
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 10px 16px;
+  }
+
+  /* ---- CLOUD ARCH ---- */
+  .cloud-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 20px 0;
+  }
+  .cloud-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .cloud-box h4 {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent2);
+    margin-bottom: 10px;
+  }
+  .cloud-box ul {
+    padding-left: 0;
+    list-style: none;
+  }
+  .cloud-box li {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+  }
+  .cloud-box li:last-child { border: none; }
+  .cloud-box li span { color: var(--text); }
+
+  .callout {
+    background: rgba(0,229,160,0.05);
+    border: 1px solid rgba(0,229,160,0.2);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 13px;
+    color: #c5cdd6;
+  }
+  .callout strong {
+    color: var(--accent);
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+  }
+
+  .callout-blue {
+    background: rgba(59,130,246,0.05);
+    border-color: rgba(59,130,246,0.2);
+    border-left-color: var(--accent2);
+  }
+  .callout-blue strong { color: var(--accent2); }
+
+  /* ---- DATA FLOW ---- */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .flow-node {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .flow-arrow {
+    color: var(--muted);
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .flow-node.hl { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- SUMMARY TOTALS ---- */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 28px 0;
+  }
+  .stat-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+  .stat-val {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="badge">Technical Implementation Plan · v1.0</div>
+    <h1>HDB 3D<br><span>Population Simulation</span></h1>
+  </div>
+  <div class="meta">
+    Singapore Housing Challenge<br>
+    Full-Stack Engineering Assessment<br>
+    March 2026
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- SUMMARY STATS -->
+  <div class="stat-row" style="margin-top:48px;">
+    <div class="stat-box"><div class="stat-val">20</div><div class="stat-label">Implementation Tasks</div></div>
+    <div class="stat-box"><div class="stat-val">~22d</div><div class="stat-label">Estimated Total</div></div>
+    <div class="stat-box"><div class="stat-val">5</div><div class="stat-label">Tech Layers</div></div>
+    <div class="stat-box"><div class="stat-val">3</div><div class="stat-label">Deploy Tiers</div></div>
+  </div>
+
+  <!-- 1. SOLUTION ARCHITECTURE -->
+  <section>
+    <div class="section-label"><span class="section-number">01</span>Solution Architecture</div>
+    <h2>System Overview</h2>
+
+    <p>The system is a geo-spatial, real-time simulation platform with three primary responsibilities: (1) rendering ~10,000+ HDB 3D building footprints with WebGL at 60fps, (2) running a stochastic demographic simulation engine server-side, and (3) persisting named simulation sessions with full replay capability.</p>
+
+    <div class="arch-grid">
+      <div class="arch-col">
+        <div class="arch-col-header">Client (Browser)</div>
+        <div class="arch-layer accent">
+          <div class="arch-layer-name">deck.gl + Mapbox GL JS</div>
+          <div class="arch-layer-desc">3D tile rendering, ScenegraphLayer for HDB OBJ models, colour-mapped vacancy overlays</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">React 18 + Vite</div>
+          <div class="arch-layer-desc">Component tree, side panels, simulation controls, session management UI</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">Zustand State Store</div>
+          <div class="arch-layer-desc">Simulation state, year cursor for timeline replay, selected building context</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">WebSocket Client</div>
+          <div class="arch-layer-desc">Receives yearly tick events, move logs, aggregate stats in real time</div>
+        </div>
+      </div>
+
+      <div class="arch-col">
+        <div class="arch-col-header">API Server</div>
+        <div class="arch-layer blue">
+          <div class="arch-layer-name">FastAPI (Python)</div>
+          <div class="arch-layer-desc">REST endpoints: buildings, sessions CRUD, simulation controls. WebSocket hub for live ticks</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">Simulation Engine</div>
+          <div class="arch-layer-desc">Async background task: births, deaths, inter-flat moves per simulated year using NumPy vectorised ops</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">Celery + Redis</div>
+          <div class="arch-layer-desc">Offloads long-running or scheduled sim ticks; pub/sub for WebSocket fan-out</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">SQLAlchemy ORM</div>
+          <div class="arch-layer-desc">Async DB access; migrations via Alembic</div>
+        </div>
+      </div>
+
+      <div class="arch-col">
+        <div class="arch-col-header">Data &amp; Infra</div>
+        <div class="arch-layer amber">
+          <div class="arch-layer-name">PostgreSQL + PostGIS</div>
+          <div class="arch-layer-desc">Buildings table with geometry; sessions, snapshots, yearly event logs</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">Redis</div>
+          <div class="arch-layer-desc">Simulation run state, WS message broker, session cache</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">GCS Bucket</div>
+          <div class="arch-layer-desc">Hosts CityJSON / OBJ 3D assets, island boundary GeoJSON, static frontend bundle</div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-name">Cloud Run (GCP)</div>
+          <div class="arch-layer-desc">Containerised API; scales to zero when idle → minimal cost at medium traffic</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Data Flow — Building Selection</h3>
+    <div class="flow">
+      <div class="flow-node">User clicks building</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">deck.gl pick event</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">Zustand: setSelected(id)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node hl">GET /buildings/:id</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">Side panel renders</div>
+    </div>
+
+    <h3>Data Flow — Simulation Tick</h3>
+    <div class="flow">
+      <div class="flow-node hl">POST /sim/tick</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">Celery task enqueued</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">Engine runs year</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">DB snapshot saved</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">WS broadcast to clients</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node hl">Map colour updates</div>
+    </div>
+  </section>
+
+  <!-- 2. TECH STACK -->
+  <section>
+    <div class="section-label"><span class="section-number">02</span>Technology Selection</div>
+    <h2>Stack Rationale</h2>
+
+    <div class="tech-grid">
+      <div class="tech-card">
+        <div class="tech-role">3D Renderer</div>
+        <div class="tech-name">deck.gl</div>
+        <div class="tech-why">GPU-accelerated WebGL2 layer system purpose-built for geo data. ScenegraphLayer renders thousands of glTF/OBJ models with instancing. Handles Singapore-scale datasets at 60fps where raw Three.js would require manual instancing and frustum culling.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Base Map</div>
+        <div class="tech-name">Mapbox GL JS</div>
+        <div class="tech-why">Native deck.gl integration. Provides Singapore basemap context. The island boundary GeoJSON renders as a FillLayer with solid green fill at no extra cost. Alternative: MapLibre GL (OSS) to avoid Mapbox API fees.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Frontend</div>
+        <div class="tech-name">React 18 + Vite</div>
+        <div class="tech-why">Concurrent rendering for smooth UI during heavy WebGL draw calls. Vite's HMR is fastest in class for iteration speed. Zustand chosen over Redux — minimal boilerplate, fine-grained subscriptions, no provider wrapping.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">API Server</div>
+        <div class="tech-name">FastAPI</div>
+        <div class="tech-why">Native async support is critical — WebSocket fan-out and Celery integration both require async I/O. Auto-generated OpenAPI docs speed up frontend integration. Python ecosystem gives instant access to NumPy for vectorised sim logic.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Database</div>
+        <div class="tech-name">PostgreSQL + PostGIS</div>
+        <div class="tech-why">PostGIS geom columns store building footprints; spatial queries identify nearest neighbours for moving-resident logic. JSONB columns efficiently store variable-length yearly event logs per simulation.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Task Queue</div>
+        <div class="tech-name">Celery + Redis</div>
+        <div class="tech-why">Simulation ticks can run 1–30s per year. Celery keeps API responsive by offloading CPU work. Redis double-serves as both Celery broker and WebSocket pub/sub channel, reducing infrastructure components.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Cloud</div>
+        <div class="tech-name">GCP Cloud Run</div>
+        <div class="tech-why">Serverless containers scale to zero between sessions — ideal for "medium traffic" SLAs where billed compute should match actual usage. Cloud SQL (Postgres) + Memorystore (Redis) complete the managed data tier.</div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-role">Containers</div>
+        <div class="tech-name">Docker Compose</div>
+        <div class="tech-why">Single <code>docker-compose up</code> spins up frontend dev server, FastAPI, Celery worker, Postgres, and Redis locally — zero manual setup for reviewers running the MVP.</div>
+      </div>
+    </div>
+
+    <h3>Alternatives Considered</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>Layer</th><th>Chosen</th><th>Alternatives</th><th>Why Not</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3D Engine</td>
+          <td class="chosen">deck.gl <span class="tag tag-chosen">chosen</span></td>
+          <td>Three.js, CesiumJS</td>
+          <td>Three.js requires manual instancing for 10k+ models. CesiumJS is heavier and more complex to style; better for satellite/terrain imagery.</td>
+        </tr>
+        <tr>
+          <td>API</td>
+          <td class="chosen">FastAPI <span class="tag tag-chosen">chosen</span></td>
+          <td>Node/Express, Django, Go Fiber</td>
+          <td>Express lacks native WebSocket+async task integration. Django is heavier for a prototyping context. Go Fiber is fast but Python's NumPy vectorisation wins for sim logic.</td>
+        </tr>
+        <tr>
+          <td>Database</td>
+          <td class="chosen">PostgreSQL <span class="tag tag-chosen">chosen</span></td>
+          <td>MongoDB, Supabase, SQLite</td>
+          <td>MongoDB lacks native spatial indexing for neighbour queries. SQLite doesn't support concurrent writes from Celery workers. Supabase is Postgres under the hood — could be used if no-ops is preferred.</td>
+        </tr>
+        <tr>
+          <td>State Mgmt</td>
+          <td class="chosen">Zustand <span class="tag tag-chosen">chosen</span></td>
+          <td>Redux Toolkit, Jotai, React Query</td>
+          <td>Redux is over-engineered for this scope. Jotai is fine but Zustand's devtools + middleware ecosystem is more mature. React Query handles server state but not WebSocket-pushed client state.</td>
+        </tr>
+        <tr>
+          <td>Deployment</td>
+          <td class="chosen">Cloud Run <span class="tag tag-chosen">chosen</span></td>
+          <td>GKE, App Engine Flex, Firebase</td>
+          <td>GKE is cost-prohibitive at medium traffic (always-on nodes). App Engine Flex has ~1min cold start. Firebase Hosting covers frontend only. Cloud Run cold starts are &lt;2s with min-instances=0.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 3. IMPLEMENTATION STRATEGY -->
+  <section>
+    <div class="section-label"><span class="section-number">03</span>Implementation Strategy</div>
+    <h2>Priority &amp; Sequencing</h2>
+
+    <p>User stories are ordered by the <em>value delivered per unit of risk</em>. The 3D map is the visual centrepiece — if it doesn't perform, no other feature matters. Simulation logic is the unique technical challenge. Session persistence and polish are valuable but can be iterated.</p>
+
+    <div class="priority-list">
+      <div class="priority-item p1">
+        <div class="priority-num">P1</div>
+        <div>
+          <div class="priority-title">3D Map Rendering — HDB Buildings + Island Boundary</div>
+          <p class="priority-desc">Highest perceived value; validates the core tech bet (deck.gl + CityJSON pipeline). Must hit 60fps on mid-tier laptops with all ~12,000 HDB blocks visible. Island boundary GeoJSON layer added alongside as it's a trivial FillLayer addition. <strong>Risk:</strong> CityJSON → OBJ/glTF conversion pipeline complexity; addressed in first task.</p>
+        </div>
+      </div>
+      <div class="priority-item p1">
+        <div class="priority-num">P1</div>
+        <div>
+          <div class="priority-title">Building Info Panel — Click to Select</div>
+          <p class="priority-desc">Direct dependency on P1 map work. Selecting a building and showing address + unit breakdown is a <em>demo moment</em> — evaluators will click immediately. Requires buildings table seeded from hdb.json. No extra infra needed.</p>
+        </div>
+      </div>
+      <div class="priority-item p2">
+        <div class="priority-num">P2</div>
+        <div>
+          <div class="priority-title">Simulation Engine — Assign, Tick, Pause</div>
+          <p class="priority-desc">Core novel feature. Assign residents → run yearly ticks → WebSocket push to client. Colour-coded occupancy map updates per tick. This is the unique technical demonstration. <strong>Risk:</strong> Celery + WebSocket fan-out integration; prototype with in-process async first, then offload.</p>
+        </div>
+      </div>
+      <div class="priority-item p2">
+        <div class="priority-num">P2</div>
+        <div>
+          <div class="priority-title">Side Panel — Stats &amp; Event Log</div>
+          <p class="priority-desc">Low implementation cost once WS events flow. Year, total residents, deaths, move log. Adds significant demo polish with minimal extra work. Build alongside simulation engine.</p>
+        </div>
+      </div>
+      <div class="priority-item p3">
+        <div class="priority-num">P3</div>
+        <div>
+          <div class="priority-title">Session Persistence &amp; Timeline Replay</div>
+          <p class="priority-desc">High user value for the "restore earlier session" story. Requires DB schema for snapshots. The timeline scrubber is a UI-only concern once snapshots exist — it just seeks to a stored year state. Deferred to P3 as it requires more DB design.</p>
+        </div>
+      </div>
+      <div class="priority-item">
+        <div class="priority-num">P4</div>
+        <div>
+          <div class="priority-title">GCP Deployment — Cloud Run + Terraform</div>
+          <p class="priority-desc">Important for deliverables but last in sequence — everything must work locally first. Terraform configs can be generated quickly once infra requirements are finalised. Cloud Run deploy from container image is straightforward.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. TASK TABLE -->
+  <section>
+    <div class="section-label"><span class="section-number">04</span>Implementation Tasks</div>
+    <h2>Work Breakdown</h2>
+
+    <table class="task-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Task</th>
+          <th>Description</th>
+          <th>Priority</th>
+          <th>Estimate</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="5" class="section-header">PHASE 1 — Data Pipeline &amp; 3D Map</td></tr>
+        <tr>
+          <td class="task-id">T-01</td>
+          <td>CityJSON → glTF conversion</td>
+          <td>Parse hdb3d-data CityJSON; convert building solids to glTF using <code>cjio</code> + custom exporter. Validate LoD1 geometry. Produce per-building asset bundle with metadata.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">1.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-02</td>
+          <td>DB schema + seeder</td>
+          <td>Define <code>buildings</code> table (id, address, geom, dwelling_units, room_counts 1–5, blk_no, street). Seed from hdb.json + CityJSON features. Alembic migration.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-03</td>
+          <td>FastAPI skeleton + Docker Compose</td>
+          <td>Project scaffold: FastAPI app, SQLAlchemy async session, Alembic, Redis, Celery worker, Postgres — all wired in <code>docker-compose.yml</code>. Health endpoint verified.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-04</td>
+          <td>Buildings API endpoint</td>
+          <td><code>GET /buildings</code> returns GeoJSON FeatureCollection for deck.gl. <code>GET /buildings/:id</code> returns full detail (address, unit counts). Spatial index on geom column.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-05</td>
+          <td>deck.gl 3D map — buildings layer</td>
+          <td>React app with Mapbox basemap. <code>ScenegraphLayer</code> renders glTF models at correct lat/lng/altitude. 60fps target verified on 10k+ instances. GCS asset loading.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">2 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-06</td>
+          <td>Island boundary layer</td>
+          <td>Load Singapore boundary GeoJSON. Render as deck.gl <code>GeoJsonLayer</code> with solid green fill + low opacity, below building layer. Toggle visibility control in UI.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-07</td>
+          <td>Building click → info panel</td>
+          <td>Pick handler on ScenegraphLayer. Fetch <code>/buildings/:id</code> on click. Render side panel: address, total dwelling units, 1–5 room breakdown. Highlight selected model.</td>
+          <td><span class="prio-badge prio-p1">P1</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+
+        <tr><td colspan="5" class="section-header">PHASE 2 — Simulation Engine</td></tr>
+        <tr>
+          <td class="task-id">T-08</td>
+          <td>Sim DB schema</td>
+          <td>Tables: <code>sessions</code>, <code>building_residents</code> (session_id, building_id, residents), <code>yearly_snapshots</code>, <code>move_log</code>. JSONB for event lists.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-09</td>
+          <td>Assign residents endpoint</td>
+          <td><code>POST /sessions/:id/assign</code>: randomise resident counts per building respecting unit capacity. Persist to <code>building_residents</code>. Return aggregate stats.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-10</td>
+          <td>Yearly simulation logic</td>
+          <td>NumPy-vectorised engine: apply birth rate (~0.9%), death rate (~0.55%), inter-flat moves (1–3% of residents relocate). Cap at unit capacity. Return delta dict + move list.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">2 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-11</td>
+          <td>Simulation control endpoints</td>
+          <td><code>POST /sessions/:id/start</code>, <code>/pause</code>, <code>/reset</code>. Celery periodic task runs ticks. Redis key tracks run state. Year counter increments from 2025.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">1 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-12</td>
+          <td>WebSocket tick broadcast</td>
+          <td>WS endpoint <code>/ws/sessions/:id</code>. After each year tick, broadcast: year, total_residents, deaths, births, move_log (from_id, to_id, count), per-building resident deltas.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">1 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-13</td>
+          <td>Occupancy colour map</td>
+          <td>On WS tick, update Zustand store with resident counts. deck.gl <code>getFillColor</code> accessor maps occupancy % to diverging colour scale (green=vacant → red=full). Smooth transition.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-14</td>
+          <td>Stats side panel + move log</td>
+          <td>Panel: current year, years simulated, total residents, deaths. Scrollable move-log with "N residents moved from Block X to Block Y". Auto-scrolls; max 100 entries retained.</td>
+          <td><span class="prio-badge prio-p2">P2</span></td>
+          <td class="est">0.5 d</td>
+        </tr>
+
+        <tr><td colspan="5" class="section-header">PHASE 3 — Sessions &amp; Timeline</td></tr>
+        <tr>
+          <td class="task-id">T-15</td>
+          <td>Session CRUD API</td>
+          <td><code>POST/GET/DELETE /sessions</code>. Session stores name, created_at, current_year, status. List view returns summary stats. Load session restores last snapshot to active state.</td>
+          <td><span class="prio-badge prio-p3">P3</span></td>
+          <td class="est">1 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-16</td>
+          <td>Session management UI</td>
+          <td>Session list modal / drawer. Create, name, restore, delete sessions. Show year reached, resident count at last save. Active session indicator on map.</td>
+          <td><span class="prio-badge prio-p3">P3</span></td>
+          <td class="est">1 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-17</td>
+          <td>Timeline scrubber / replay</td>
+          <td>Slider from year 0 → current year. On drag: fetch snapshot for that year, update Zustand, re-render colour map. Play button animates at configurable speed (1–10 years/sec).</td>
+          <td><span class="prio-badge prio-p3">P3</span></td>
+          <td class="est">1.5 d</td>
+        </tr>
+
+        <tr><td colspan="5" class="section-header">PHASE 4 — Cloud Deployment</td></tr>
+        <tr>
+          <td class="task-id">T-18</td>
+          <td>Production Dockerfiles</td>
+          <td>Multi-stage Dockerfiles for API (slim Python) and frontend (Nginx static). GCS bucket configured for 3D assets + CORS. CI pipeline: test → build → push to Artifact Registry.</td>
+          <td><span class="prio-badge prio-p4">P4</span></td>
+          <td class="est">1 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-19</td>
+          <td>Terraform — GCP infra</td>
+          <td>Cloud Run (API + worker), Cloud SQL Postgres, Memorystore Redis, GCS bucket, VPC connector, IAM roles, Cloud Armor WAF. <code>terraform apply</code> from zero to running app.</td>
+          <td><span class="prio-badge prio-p4">P4</span></td>
+          <td class="est">2 d</td>
+        </tr>
+        <tr>
+          <td class="task-id">T-20</td>
+          <td>Load testing + cost estimation</td>
+          <td>k6 script simulates 200 concurrent users: map load, building clicks, simulation ticks. Verify Cloud Run autoscaling. Document projected monthly cost at steady-state medium traffic.</td>
+          <td><span class="prio-badge prio-p4">P4</span></td>
+          <td class="est">1 d</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>Total estimate: ~21.5 days</strong> across 4 phases. An experienced developer focusing on P1+P2 (MVP) delivers a compelling demo in ~10–11 days. P3 and P4 add production-readiness over the following 10 days.
+    </div>
+  </section>
+
+  <!-- 5. CLOUD ARCHITECTURE -->
+  <section>
+    <div class="section-label"><span class="section-number">05</span>Cloud Architecture</div>
+    <h2>GCP Deployment — Minimal Cost at Medium Traffic</h2>
+
+    <p>The guiding principle: <em>pay only when traffic arrives</em>. Cloud Run's scale-to-zero model means the app costs ~$0 during off-hours while handling bursts of concurrent users without over-provisioning.</p>
+
+    <div class="cloud-grid">
+      <div class="cloud-box">
+        <h4>Compute</h4>
+        <ul>
+          <li>Cloud Run — API service <span>min-instances=1 (warm standby)</span></li>
+          <li>Cloud Run — Celery worker <span>min-instances=0</span></li>
+          <li>Cloud CDN + GCS <span>3D assets + frontend static</span></li>
+          <li>Firebase Hosting (alt.) <span>frontend SPA fallback</span></li>
+        </ul>
+      </div>
+      <div class="cloud-box">
+        <h4>Data</h4>
+        <ul>
+          <li>Cloud SQL (Postgres 15) <span>db-f1-micro, shared CPU</span></li>
+          <li>Memorystore Redis <span>M1 Basic, 1GB</span></li>
+          <li>GCS Standard bucket <span>multi-regional, assets</span></li>
+          <li>Cloud SQL auto-backup <span>7-day retention</span></li>
+        </ul>
+      </div>
+      <div class="cloud-box">
+        <h4>Networking</h4>
+        <ul>
+          <li>VPC Connector <span>Cloud Run ↔ private SQL/Redis</span></li>
+          <li>Cloud Load Balancer <span>HTTPS termination + CDN</span></li>
+          <li>Cloud Armor <span>basic WAF, DDoS protection</span></li>
+          <li>Custom domain via Cloud DNS <span>optional</span></li>
+        </ul>
+      </div>
+      <div class="cloud-box">
+        <h4>Estimated Monthly Cost</h4>
+        <ul>
+          <li>Cloud Run (API) <span>~$15–30</span></li>
+          <li>Cloud SQL db-f1-micro <span>~$10</span></li>
+          <li>Memorystore Redis 1GB <span>~$35</span></li>
+          <li>GCS + CDN egress <span>~$5–15</span></li>
+          <li><strong>Total</strong> <span><strong>~$65–90/mo</strong></span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout-blue">
+      <strong>Cost optimisation note:</strong> Redis Memorystore is the dominant cost at medium traffic. If budget is constrained, consider Upstash Redis (serverless, ~$0.2/100k commands) as a managed alternative that scales to near-zero. Cloud SQL can use the db-f1-micro shared-CPU tier which costs ~$7/month for this workload.
+    </div>
+  </section>
+
+  <!-- 6. API SPEC -->
+  <section>
+    <div class="section-label"><span class="section-number">06</span>API Surface</div>
+    <h2>Key Endpoints</h2>
+
+    <table class="compare-table">
+      <thead>
+        <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>GET</code></td><td><code>/buildings</code></td><td>All HDB buildings as GeoJSON FeatureCollection (used by deck.gl layer)</td></tr>
+        <tr><td><code>GET</code></td><td><code>/buildings/:id</code></td><td>Single building: address, dwelling units, 1–5 room counts, current residents (if session active)</td></tr>
+        <tr><td><code>POST</code></td><td><code>/sessions</code></td><td>Create new simulation session with name</td></tr>
+        <tr><td><code>GET</code></td><td><code>/sessions</code></td><td>List all sessions with summary stats</td></tr>
+        <tr><td><code>POST</code></td><td><code>/sessions/:id/assign</code></td><td>Randomly assign initial residents to all buildings</td></tr>
+        <tr><td><code>POST</code></td><td><code>/sessions/:id/start</code></td><td>Start simulation (enqueues Celery ticker)</td></tr>
+        <tr><td><code>POST</code></td><td><code>/sessions/:id/pause</code></td><td>Pause simulation</td></tr>
+        <tr><td><code>GET</code></td><td><code>/sessions/:id/snapshot/:year</code></td><td>Fetch stored snapshot for timeline replay</td></tr>
+        <tr><td><code>WS</code></td><td><code>/ws/sessions/:id</code></td><td>WebSocket: receives yearly tick events in real time</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 7. RISKS -->
+  <section>
+    <div class="section-label"><span class="section-number">07</span>Risks &amp; Mitigations</div>
+    <h2>Technical Risks</h2>
+
+    <table class="compare-table">
+      <thead>
+        <tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CityJSON geometry parsing complexity — some buildings may have malformed / LoD2-only geometry</td>
+          <td>Medium</td>
+          <td>Use <code>cjio</code> library's validation pass; fall back to extruded footprint polygon if solid geometry unavailable. Both render acceptably in deck.gl.</td>
+        </tr>
+        <tr>
+          <td>60fps performance with 12,000+ 3D instances</td>
+          <td>Medium</td>
+          <td>deck.gl's ScenegraphLayer uses GPU instancing — tested to 100k+ instances. Use simplified low-poly glTF model per building. Add LOD: show extruded polygon layer at zoom &lt; 14.</td>
+        </tr>
+        <tr>
+          <td>WebSocket disconnection during long sim runs</td>
+          <td>Low-Med</td>
+          <td>Client reconnects automatically; server replays last N ticks from Redis stream on reconnect. Simulation state is always the DB truth, not the WebSocket.</td>
+        </tr>
+        <tr>
+          <td>Cloud Run cold starts interrupting WebSocket sessions</td>
+          <td>Low</td>
+          <td>Set <code>min-instances=1</code> on the API service to eliminate cold starts for active sessions. Worker can still scale to zero.</td>
+        </tr>
+        <tr>
+          <td>Mapbox token cost / rate limits</td>
+          <td>Low</td>
+          <td>Swap to MapLibre GL JS (OSS drop-in) + OpenStreetMap tiles or Singapore's OneMap tiles, which are free for SG-based apps.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  <span>HDB 3D Population Simulation · Technical Plan v1.0</span>
+  <span>Generated March 2026</span>
+</footer>
+
+</body>
+</html>
