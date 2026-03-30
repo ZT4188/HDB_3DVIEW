@@ -13,7 +13,7 @@ echo "📦 Downloading HDB 3D data from ualsg/hdb3d-data..."
 # Download hdb.json (unit counts)
 if [ ! -f "$ASSETS_DIR/hdb.json" ]; then
   curl -L \
-    "https://raw.githubusercontent.com/ualsg/hdb3d-data/master/data/hdb.json" \
+    "https://raw.githubusercontent.com/ualsg/hdb3d-data/master/hdb.json" \
     -o "$ASSETS_DIR/hdb.json"
   echo "✅ hdb.json downloaded"
 else

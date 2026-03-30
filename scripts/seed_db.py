@@ -1,93 +1,144 @@
 #!/usr/bin/env python3
-"""
-Seed the buildings table from hdb.json (from ualsg/hdb3d-data).
-
-Usage:
-  docker compose exec api python scripts/seed_db.py
-  # or locally:
-  python scripts/seed_db.py --hdb-json path/to/hdb.json
-"""
-
-import asyncio
-import json
-import os
-import sys
-import hashlib
-import argparse
-
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+import asyncio, json, os, sys, hashlib, argparse, math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
+from sqlalchemy.dialects.postgresql import insert
 from app.models.models import Building, Base
-from app.database import engine
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://hdb3d:hdb3dlocal@localhost:5432/hdb3d",
-)
-
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+from app.database import engine, AsyncSessionLocal
 
 
-def make_building_id(blk_no: str, street: str) -> str:
-    key = f"{blk_no}_{street}".upper().replace(" ", "_")
-    return hashlib.md5(key.encode()).hexdigest()[:12]
+def make_id(cj_id: str) -> str:
+    return hashlib.md5(cj_id.encode()).hexdigest()[:12]
 
 
-async def seed(hdb_json_path: str):
-    # Create all tables
+def svy21_to_wgs84(N, E):
+    """Convert SVY21 (Northing, Easting) to WGS84 (lat, lng)."""
+    # SVY21 origin: lat=1.366666, lng=103.833333
+    a = 6378137.0          # WGS84 semi-major axis
+    f = 1 / 298.257223563
+    b = a * (1 - f)
+    e2 = 1 - (b/a)**2
+    e_prime2 = (a/b)**2 - 1
+
+    # SVY21 projection constants
+    N0 = 38744.572         # False Northing
+    E0 = 28001.642         # False Easting
+    k0 = 1.0               # Scale factor
+    lat0 = math.radians(1 + 22/60 + 2.9154/3600)   # 1°22'02.9154"N
+    lng0 = math.radians(103 + 49/60 + 31.9987/3600) # 103°49'31.9987"E
+
+    Nv = N - N0
+    Ev = E - E0
+
+    M0 = a * ((1 - e2/4 - 3*e2**2/64) * lat0
+              - (3*e2/8 + 3*e2**2/32) * math.sin(2*lat0)
+              + (15*e2**2/256) * math.sin(4*lat0))
+
+    M = M0 + Nv / k0
+    mu = M / (a * (1 - e2/4 - 3*e2**2/64))
+
+    e1 = (1 - math.sqrt(1-e2)) / (1 + math.sqrt(1-e2))
+    lat1 = (mu
+            + (3*e1/2 - 27*e1**3/32) * math.sin(2*mu)
+            + (21*e1**2/16 - 55*e1**4/32) * math.sin(4*mu)
+            + (151*e1**3/96) * math.sin(6*mu))
+
+    N1 = a / math.sqrt(1 - e2 * math.sin(lat1)**2)
+    T1 = math.tan(lat1)**2
+    C1 = e_prime2 * math.cos(lat1)**2
+    R1 = a*(1-e2) / (1 - e2*math.sin(lat1)**2)**1.5
+    D  = Ev / (N1 * k0)
+
+    lat = lat1 - (N1*math.tan(lat1)/R1) * (
+        D**2/2
+        - (5 + 3*T1 + 10*C1 - 4*C1**2 - 9*e_prime2) * D**4/24
+        + (61 + 90*T1 + 298*C1 + 45*T1**2 - 252*e_prime2 - 3*C1**2) * D**6/720
+    )
+    lng = lng0 + (
+        D
+        - (1 + 2*T1 + C1) * D**3/6
+        + (5 - 2*C1 + 28*T1 - 3*C1**2 + 8*e_prime2 + 24*T1**2) * D**5/120
+    ) / math.cos(lat1)
+
+    return math.degrees(lat), math.degrees(lng)
+
+
+def get_centroid(city_obj, vertices):
+    xs, ys = [], []
+
+    def collect(b):
+        if isinstance(b, list):
+            for i in b:
+                collect(i)
+        elif isinstance(b, int) and b < len(vertices):
+            v = vertices[b]
+            xs.append(v[0])   # Easting
+            ys.append(v[1])   # Northing
+
+    for geom in city_obj.get("geometry", []):
+        collect(geom.get("boundaries", []))
+
+    if not xs:
+        return None, None
+
+    avg_e = sum(xs) / len(xs)
+    avg_n = sum(ys) / len(ys)
+    return svy21_to_wgs84(avg_n, avg_e)
+
+
+async def seed(path: str):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    with open(hdb_json_path, "r") as f:
+    print(f"Loading {path} ...")
+    with open(path) as f:
         data = json.load(f)
 
-    # hdb.json structure: list of records with keys like
-    # blk_no, street, max_floor_lvl, year_completed,
-    # 1room_sold, 2room_sold, 3room_sold, 4room_sold, 5room_sold,
-    # total_dwelling_units, lat, lng (approximate)
-    records = data if isinstance(data, list) else data.get("records", [])
+    city_objects = data["CityObjects"]
+    vertices = data.get("vertices", [])
+    print(f"Total CityObjects: {len(city_objects)}")
 
     buildings = []
-    for r in records:
-        blk_no = str(r.get("blk_no", "")).strip()
-        street = str(r.get("street", "")).strip()
-        if not blk_no or not street:
+    skipped = 0
+    for cj_id, obj in city_objects.items():
+        attrs = obj.get("attributes", {})
+        blk    = str(attrs.get("hdb_blk_no", "")).strip()
+        street = str(attrs.get("hdb_street", "")).strip()
+        if not blk or not street:
+            skipped += 1
             continue
 
-        lat = float(r.get("lat", r.get("latitude", 1.3521)))
-        lng = float(r.get("lng", r.get("longitude", 103.8198)))
+        lat, lng = get_centroid(obj, vertices)
+        if lat is None:
+            skipped += 1
+            continue
 
-        b = Building(
-            id=make_building_id(blk_no, street),
-            blk_no=blk_no,
+        if not (1.1 <= lat <= 1.5 and 103.5 <= lng <= 104.1):
+            skipped += 1
+            continue
+
+        buildings.append(dict(
+            id=make_id(cj_id),
+            blk_no=blk,
             street=street,
-            address=f"BLK {blk_no} {street}, SINGAPORE",
-            dwelling_units=int(r.get("total_dwelling_units", 0)),
-            room_1=int(r.get("1room_sold", r.get("1room_rental", 0))),
-            room_2=int(r.get("2room_sold", r.get("2room_rental", 0))),
-            room_3=int(r.get("3room_sold", 0)),
-            room_4=int(r.get("4room_sold", 0)),
-            room_5=int(r.get("5room_sold", 0)),
+            address=f"BLK {blk} {street}, SINGAPORE",
+            dwelling_units=int(attrs.get("hdb_total_dwelling_units", 0) or 0),
+            room_1=int(attrs.get("hdb_1room_sold", 0) or 0),
+            room_2=int(attrs.get("hdb_2room_sold", 0) or 0),
+            room_3=int(attrs.get("hdb_3room_sold", 0) or 0),
+            room_4=int(attrs.get("hdb_4room_sold", 0) or 0),
+            room_5=int(attrs.get("hdb_5room_sold", 0) or 0),
             latitude=lat,
             longitude=lng,
-            cityjson_id=r.get("cityjson_id"),
-        )
-        buildings.append(b)
+            cityjson_id=cj_id,
+        ))
+
+    print(f"Parsed {len(buildings)} buildings, skipped {skipped}")
 
     async with AsyncSessionLocal() as db:
-        # Upsert: skip existing IDs
-        from sqlalchemy.dialects.postgresql import insert
         for b in buildings:
-            stmt = insert(Building).values(
-                id=b.id, blk_no=b.blk_no, street=b.street,
-                address=b.address, dwelling_units=b.dwelling_units,
-                room_1=b.room_1, room_2=b.room_2, room_3=b.room_3,
-                room_4=b.room_4, room_5=b.room_5,
-                latitude=b.latitude, longitude=b.longitude,
-                cityjson_id=b.cityjson_id,
-            ).on_conflict_do_nothing(index_elements=["id"])
+            stmt = insert(Building).values(**b).on_conflict_do_nothing(
+                index_elements=["id"])
             await db.execute(stmt)
         await db.commit()
 
@@ -96,10 +147,6 @@ async def seed(hdb_json_path: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--hdb-json",
-        default=os.path.join(os.path.dirname(__file__), "../assets/hdb.json"),
-        help="Path to hdb.json from ualsg/hdb3d-data",
-    )
+    parser.add_argument("--hdb-json", default="/assets/hdb.json")
     args = parser.parse_args()
     asyncio.run(seed(args.hdb_json))
